@@ -1,8 +1,7 @@
 plugins {
-    id "java"
-    id "maven-publish"
-    id "org.embulk.embulk-plugins" version "0.6.2"
-    id "com.diffplug.spotless" version "6.25.0"
+    java
+    id("org.embulk.embulk-plugins") version("0.6.2")
+    id("com.diffplug.spotless") version( "6.25.0")
 
 }
 
@@ -47,21 +46,21 @@ spotless {
     }
 }
 
-compileJava {
+tasks.compileJava {
     dependsOn(tasks.spotlessApply)
 }
 
 publishing {
     publications {
-        maven(MavenPublication) {
-            groupId = project.group
+        create<MavenPublication>("maven") {
+            groupId = project.group.toString()
             artifactId = project.name
-            version = project.version
+            version = project.version.toString()
 
-            from(components.java)
+            from(components["java"])
 
             pom {
-                packaging "jar"
+                packaging = "jar"
 
                 name = project.name
                 description = project.description
@@ -84,13 +83,13 @@ publishing {
 }
 
 // For local testing
-tasks.register('cacheToMavenLocal', Sync) {
-    from new File(gradle.gradleUserHomeDir, 'caches/modules-2/files-2.1')
-    into repositories.mavenLocal().url
+tasks.register("cacheToMavenLocal", Sync::class) {
+    from(File(gradle.gradleUserHomeDir, "caches/modules-2/files-2.1"))
+    into(repositories.mavenLocal().url)
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     eachFile {
-        List<String> parts = it.path.split("/")
-        it.path = [parts[0].replace('.', '/'), parts[1], parts[2], parts[4]].join('/')
+        val parts: List<String> = path.split("/")
+        path = listOf(parts[0].replace(".", "/"), parts[1], parts[2], parts[4]).joinToString("/")
     }
-    includeEmptyDirs false
+    includeEmptyDirs = false
 }
