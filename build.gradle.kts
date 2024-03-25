@@ -12,7 +12,7 @@ java {
 }
 
 group = "com.reproio.embulk"
-version = "1.0-SNAPSHOT"
+version = "0.1.0"
 description = "Embulk input plugin for Trino JDBC"
 
 embulkPlugin {
@@ -80,6 +80,20 @@ publishing {
             }
         }
     }
+}
+
+tasks.gem {
+    from("LICENSE.txt")
+    setProperty("authors", listOf(""))
+    setProperty("email", listOf(""))
+    setProperty("description", "Trino JDBC input plugin for Embulk")
+    setProperty("summary", "Trino JDBC input plugin for Embulk")
+    setProperty("homepage", "https://github.com/reproio/embulk-input-trino-jdbc")
+    setProperty("licenses", listOf("Apache-2.0"))
+}
+
+tasks.gemPush {
+    setProperty("host", "https://rubygems.org")
 }
 
 // For local testing
