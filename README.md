@@ -1,6 +1,6 @@
 # Trino input plugin for Embulk
 
-Trino input plugin for Embulk loads records from Trino.
+Trino input plugin for Embulk loads records from Trino using trino-jdbc.
 
 ## Overview
 
@@ -11,6 +11,12 @@ Trino input plugin for Embulk loads records from Trino.
 
 ```
 java -jar /path/to/embulk.jar install com.reproio.embulk:embulk-input-trino-jdbc:<version>
+```
+
+or
+
+```
+java -jar /path/to/embulk.jar gem install embulk-input-trino-jdbc
 ```
 
 ## Configuration
@@ -76,6 +82,13 @@ $ ./gradlew build
 ```console
 $ ./gradlew publish
 ```
+
+Set OTP if you need:
+```
+$ env GEM_HOST_OTP_CODE=XXXXXX ./gradlew publish
+```
+
+or customize your default API key on rubygems.org.
 
 ## Local Development
 
