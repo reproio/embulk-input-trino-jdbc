@@ -29,6 +29,11 @@ repositories {
     mavenCentral()
 }
 
+// Tests load the plugin classes, which need the Embulk APIs provided by Embulk at runtime.
+configurations.testImplementation {
+    extendsFrom(configurations.compileOnly.get())
+}
+
 dependencies {
     compileOnly("org.embulk:embulk-spi:0.11")
     compileOnly("org.embulk:embulk-api:0.10.43")
@@ -37,8 +42,6 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.9.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation("org.embulk:embulk-spi:0.11")
-    testImplementation("org.embulk:embulk-api:0.10.43")
     testImplementation("org.testcontainers:testcontainers-trino:2.0.5")
     testRuntimeOnly("org.slf4j:slf4j-simple:2.0.7")
 }

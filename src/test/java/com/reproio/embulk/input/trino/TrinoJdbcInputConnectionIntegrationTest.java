@@ -85,32 +85,13 @@ class TrinoJdbcInputConnectionIntegrationTest {
                 }
               });
 
-      // The query ID first points to START TRANSACTION, which is run by the same statement.
-      String queryId;
-      try {
-        queryId =
-            waitForQueryState(monitor, con::getRunningQueryId, "RUNNING", Duration.ofSeconds(60));
-      } catch (AssertionError e) {
-        if (fetching.isCompletedExceptionally()) {
-          fetching.exceptionally(
-              t -> {
-                e.addSuppressed(t);
-                return null;
-              });
-        }
-        throw e;
-      }
+      String queryId = waitForRunning(monitor, con, fetching);
 
-      long start = System.nanoTime();
       con.cancelRunningQuery();
 
       waitForQueryState(monitor, () -> queryId, "FAILED", Duration.ofSeconds(10));
-      assertEquals("USER_CANCELED", findQuery(monitor, queryId).get().errorCode);
-      ExecutionException e =
-          assertThrows(ExecutionException.class, () -> fetching.get(10, TimeUnit.SECONDS));
-      System.out.printf(
-          "Cancelled %s in %d ms: %s%n",
-          queryId, Duration.ofNanos(System.nanoTime() - start).toMillis(), e.getCause());
+      assertEquals("USER_CANCELED", findQuery(monitor, queryId).get().errorCode());
+      assertThrows(ExecutionException.class, () -> fetching.get(10, TimeUnit.SECONDS));
     }
   }
 
@@ -118,17 +99,37 @@ class TrinoJdbcInputConnectionIntegrationTest {
     return DriverManager.getConnection(trino.getJdbcUrl(), "test", null);
   }
 
+  // Returns the ID of the running query. If the query does not start, attaches the failure of
+  // fetching to the assertion error.
+  private static String waitForRunning(
+      Connection monitor, TrinoJdbcInputConnection con, CompletableFuture<Void> fetching)
+      throws SQLException, InterruptedException {
+    try {
+      // The query ID first points to START TRANSACTION, which is run by the same statement.
+      return waitForQueryState(monitor, con::getRunningQueryId, "RUNNING", Duration.ofSeconds(60));
+    } catch (AssertionError e) {
+      if (fetching.isCompletedExceptionally()) {
+        fetching.exceptionally(
+            t -> {
+              e.addSuppressed(t);
+              return null;
+            });
+      }
+      throw e;
+    }
+  }
+
   private static String waitForQueryState(
-      Connection monitor, Supplier<String> queryId, String expectedState, Duration timeout)
+      Connection monitor, Supplier<String> queryIdSupplier, String expectedState, Duration timeout)
       throws SQLException, InterruptedException {
     long deadline = System.nanoTime() + timeout.toNanos();
     String id = null;
     Optional<QueryState> last = Optional.empty();
     while (System.nanoTime() - deadline < 0) {
-      id = queryId.get();
+      id = queryIdSupplier.get();
       if (id != null) {
         last = findQuery(monitor, id);
-        if (last.isPresent() && last.get().state.equals(expectedState)) {
+        if (last.isPresent() && last.get().state().equals(expectedState)) {
           return id;
         }
       }
@@ -152,18 +153,5 @@ class TrinoJdbcInputConnectionIntegrationTest {
     }
   }
 
-  private static class QueryState {
-    final String state;
-    final String errorCode;
-
-    QueryState(String state, String errorCode) {
-      this.state = state;
-      this.errorCode = errorCode;
-    }
-
-    @Override
-    public String toString() {
-      return "state=" + state + ", error_code=" + errorCode;
-    }
-  }
+  private record QueryState(String state, String errorCode) {}
 }

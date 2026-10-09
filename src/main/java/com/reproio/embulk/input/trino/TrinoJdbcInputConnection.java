@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
 public class TrinoJdbcInputConnection extends JdbcInputConnection {
   private static final Logger logger = LoggerFactory.getLogger(TrinoJdbcInputConnection.class);
 
-  // ECS sends SIGKILL 30 seconds (stopTimeout) after SIGTERM by default.
+  // Must be well below the default ECS stopTimeout (30 seconds), after which ECS sends SIGKILL.
   private static final Duration CANCEL_TIMEOUT = Duration.ofSeconds(10);
 
   private final RunningQueryCanceller canceller = new RunningQueryCanceller(CANCEL_TIMEOUT);
@@ -31,7 +31,8 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
   /**
    * Wraps the connection and registers a shutdown hook that cancels the running query.
    *
-   * @param connection the Trino connection, which is closed if this constructor fails
+   * @param connection the Trino connection, which is closed if the shutdown hook cannot be
+   *     registered
    * @throws SQLException if the JVM is already shutting down or the connection fails
    */
   public TrinoJdbcInputConnection(Connection connection) throws SQLException {
@@ -64,7 +65,7 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
     PreparedStatement stmt = connection.prepareStatement(query);
     stmt.setFetchSize(fetchRows);
     stmt.setQueryTimeout(queryTimeout);
-    logger.info("SQL: " + query);
+    logger.info("SQL: {}", query);
     if (!params.isEmpty()) {
       logger.info("Parameters: {}", params);
       prepareParameters(stmt, getters, params);
@@ -73,7 +74,7 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
       stmt.unwrap(TrinoStatement.class)
           .setProgressMonitor(stats -> canceller.setQueryId(stats.getQueryId()));
     }
-    canceller.start(stmt);
+    canceller.track(stmt);
     return new CancellableSingleSelect(stmt);
   }
 
@@ -106,8 +107,6 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
       this.fetchStatement = fetchStatement;
     }
 
-    // Refuse to submit the query once the JVM has started shutting down. Otherwise the query
-    // submitted after the shutdown hook keeps running on the Trino server.
     @Override
     public ResultSet fetch() throws SQLException {
       if (executed) {
@@ -115,28 +114,7 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
         return super.fetch();
       }
       executed = true;
-      canceller.beforeExecute();
-      ResultSet rs;
-      try {
-        rs = super.fetch();
-      } catch (SQLException | RuntimeException e) {
-        if (canceller.isCancelled()) {
-          throw canceller.cancelledException(e);
-        }
-        throw e;
-      } finally {
-        canceller.afterExecute();
-      }
-      if (canceller.isCancelled()) {
-        SQLException ex = canceller.cancelledException(null);
-        try {
-          rs.close();
-        } catch (SQLException closeError) {
-          ex.addSuppressed(closeError);
-        }
-        throw ex;
-      }
-      return rs;
+      return canceller.execute(super::fetch);
     }
 
     @Override
@@ -146,7 +124,7 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
       try {
         fetchStatement.close();
       } finally {
-        canceller.finish(fetchStatement);
+        canceller.untrack(fetchStatement);
       }
     }
   }
