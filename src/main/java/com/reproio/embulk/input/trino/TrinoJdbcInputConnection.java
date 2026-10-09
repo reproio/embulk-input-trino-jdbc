@@ -3,6 +3,7 @@ package com.reproio.embulk.input.trino;
 import io.trino.jdbc.TrinoStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
@@ -27,10 +28,28 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
   private final RunningQueryCanceller canceller = new RunningQueryCanceller(CANCEL_TIMEOUT);
   private final Thread shutdownHook;
 
+  /**
+   * Wraps the connection and registers a shutdown hook that cancels the running query.
+   *
+   * @param connection the Trino connection, which is closed if this constructor fails
+   * @throws SQLException if the JVM is already shutting down or the connection fails
+   */
   public TrinoJdbcInputConnection(Connection connection) throws SQLException {
     super(connection, null);
     shutdownHook = new Thread(canceller::cancelRunningQuery, "trino-query-cancel-hook");
-    Runtime.getRuntime().addShutdownHook(shutdownHook);
+    try {
+      Runtime.getRuntime().addShutdownHook(shutdownHook);
+    } catch (IllegalStateException e) {
+      // The JVM is already shutting down.
+      SQLException ex =
+          new SQLException("Cannot connect to Trino while the JVM is shutting down", e);
+      try {
+        connection.close();
+      } catch (SQLException closeError) {
+        ex.addSuppressed(closeError);
+      }
+      throw ex;
+    }
   }
 
   // Same as JdbcInputConnection#newBatchSelect in embulk-input-jdbc 0.13.2, except that the
@@ -80,16 +99,55 @@ public class TrinoJdbcInputConnection extends JdbcInputConnection {
 
   private class CancellableSingleSelect extends SingleSelect {
     private final PreparedStatement fetchStatement;
+    private boolean executed = false;
 
     CancellableSingleSelect(PreparedStatement fetchStatement) {
       super(fetchStatement);
       this.fetchStatement = fetchStatement;
     }
 
+    // Refuse to submit the query once the JVM has started shutting down. Otherwise the query
+    // submitted after the shutdown hook keeps running on the Trino server.
+    @Override
+    public ResultSet fetch() throws SQLException {
+      if (executed) {
+        // SingleSelect#fetch() returns null without executing anything from the second time.
+        return super.fetch();
+      }
+      executed = true;
+      canceller.beforeExecute();
+      ResultSet rs;
+      try {
+        rs = super.fetch();
+      } catch (SQLException | RuntimeException e) {
+        if (canceller.isCancelled()) {
+          throw canceller.cancelledException(e);
+        }
+        throw e;
+      } finally {
+        canceller.afterExecute();
+      }
+      if (canceller.isCancelled()) {
+        SQLException ex = canceller.cancelledException(null);
+        try {
+          rs.close();
+        } catch (SQLException closeError) {
+          ex.addSuppressed(closeError);
+        }
+        throw ex;
+      }
+      return rs;
+    }
+
     @Override
     public void close() throws SQLException {
-      canceller.finish(fetchStatement);
-      fetchStatement.close();
+      // Untrack the statement after closing it, so that the shutdown hook can still cancel it if
+      // the hook runs before the statement is closed.
+      try {
+        fetchStatement.close();
+      } finally {
+        canceller.finish(fetchStatement);
+      }
     }
   }
 }

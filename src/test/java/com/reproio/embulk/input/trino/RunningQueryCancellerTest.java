@@ -2,6 +2,8 @@ package com.reproio.embulk.input.trino;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Proxy;
@@ -9,7 +11,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Test;
 
 class RunningQueryCancellerTest {
@@ -116,12 +121,77 @@ class RunningQueryCancellerTest {
     assertTrue(elapsed < 5000, "cancelRunningQuery took " + elapsed + " ms");
   }
 
+  @Test
+  void refusesExecutionAfterCancel() {
+    RunningQueryCanceller canceller = new RunningQueryCanceller(Duration.ofSeconds(5));
+
+    canceller.cancelRunningQuery();
+
+    assertThrows(SQLException.class, canceller::beforeExecute);
+  }
+
+  @Test
+  void retriesCancelUntilExecutionFinishes() throws Exception {
+    AtomicBoolean executionFinished = new AtomicBoolean();
+    AtomicInteger cancelCount = new AtomicInteger();
+    AtomicInteger cancelCountAfterExecution = new AtomicInteger();
+    CountDownLatch cancelledWhileExecuting = new CountDownLatch(1);
+    Statement statement =
+        fakeStatement(
+            () -> {
+              cancelCount.incrementAndGet();
+              if (executionFinished.get()) {
+                cancelCountAfterExecution.incrementAndGet();
+              } else {
+                cancelledWhileExecuting.countDown();
+              }
+            });
+    RunningQueryCanceller canceller = new RunningQueryCanceller(Duration.ofSeconds(5));
+
+    canceller.start(statement);
+    canceller.beforeExecute();
+    Thread hook = new Thread(canceller::cancelRunningQuery);
+    hook.start();
+    assertTrue(cancelledWhileExecuting.await(5, TimeUnit.SECONDS));
+    executionFinished.set(true);
+    canceller.afterExecute();
+    hook.join(5000);
+
+    assertFalse(hook.isAlive());
+    assertTrue(cancelCount.get() >= 2, "cancel was called " + cancelCount.get() + " times");
+    assertTrue(cancelCountAfterExecution.get() >= 1, "cancel was not called after execution");
+    assertTrue(canceller.isCancelled());
+  }
+
+  @Test
+  void stopsRetryingWhenStatementIsClosed() {
+    AtomicInteger cancelCount = new AtomicInteger();
+    Statement statement =
+        fakeStatement(
+            () -> {
+              cancelCount.incrementAndGet();
+              throw new SQLException("Statement is closed");
+            },
+            () -> true);
+    RunningQueryCanceller canceller = new RunningQueryCanceller(Duration.ofSeconds(5));
+
+    canceller.start(statement);
+    assertDoesNotThrow(canceller::beforeExecute);
+    canceller.cancelRunningQuery();
+
+    assertEquals(1, cancelCount.get());
+  }
+
   @FunctionalInterface
   private interface CancelAction {
     void run() throws Exception;
   }
 
   private static Statement fakeStatement(CancelAction onCancel) {
+    return fakeStatement(onCancel, () -> false);
+  }
+
+  private static Statement fakeStatement(CancelAction onCancel, BooleanSupplier isClosed) {
     return (Statement)
         Proxy.newProxyInstance(
             Statement.class.getClassLoader(),
@@ -131,6 +201,8 @@ class RunningQueryCancellerTest {
                 case "cancel":
                   onCancel.run();
                   return null;
+                case "isClosed":
+                  return isClosed.getAsBoolean();
                 case "equals":
                   return proxy == args[0];
                 case "hashCode":

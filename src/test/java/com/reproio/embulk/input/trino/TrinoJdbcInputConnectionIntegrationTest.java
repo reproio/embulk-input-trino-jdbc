@@ -20,11 +20,13 @@ import org.embulk.input.jdbc.JdbcInputConnection.BatchSelect;
 import org.embulk.input.jdbc.JdbcInputConnection.PreparedQuery;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.trino.TrinoContainer;
 import org.testcontainers.utility.DockerImageName;
 
+@Tag("integration")
 class TrinoJdbcInputConnectionIntegrationTest {
   private static TrinoContainer trino;
 
@@ -48,7 +50,7 @@ class TrinoJdbcInputConnectionIntegrationTest {
         rs.next();
         return;
       } catch (SQLException e) {
-        if (System.nanoTime() > deadline) {
+        if (System.nanoTime() - deadline > 0) {
           throw new AssertionError("Trino worker did not become available in " + timeout, e);
         }
         Thread.sleep(500);
@@ -122,7 +124,7 @@ class TrinoJdbcInputConnectionIntegrationTest {
     long deadline = System.nanoTime() + timeout.toNanos();
     String id = null;
     Optional<QueryState> last = Optional.empty();
-    while (System.nanoTime() < deadline) {
+    while (System.nanoTime() - deadline < 0) {
       id = queryId.get();
       if (id != null) {
         last = findQuery(monitor, id);

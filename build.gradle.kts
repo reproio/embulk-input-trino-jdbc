@@ -44,7 +44,21 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("integration")
+    }
+}
+
+// Integration tests run Trino with Testcontainers, so they need Docker.
+val integrationTest by tasks.registering(Test::class) {
+    description = "Runs integration tests that need Docker."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    shouldRunAfter(tasks.test)
 }
 
 spotless {
