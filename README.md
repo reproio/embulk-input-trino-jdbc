@@ -77,6 +77,12 @@ See sub projects of [embulk-input-jdbc](https://github.com/embulk/embulk-input-j
 $ ./gradlew build
 ```
 
+Integration tests run Trino with Testcontainers, so they need Docker:
+
+```console
+$ ./gradlew integrationTest
+```
+
 ## Release
 
 ```console

@@ -24,7 +24,7 @@ public class TrinoJdbcInputPlugin extends AbstractJdbcInputPlugin {
     }
     String url = buildUrl(t);
     Connection connection = DriverManager.getConnection(url, properties);
-    return new JdbcInputConnection(connection, null);
+    return new TrinoJdbcInputConnection(connection);
   }
 
   // Build URL such as `jdbc:trino://${host}:${port}/${catalog}/${schema}`

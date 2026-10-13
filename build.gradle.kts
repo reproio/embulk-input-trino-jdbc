@@ -29,6 +29,11 @@ repositories {
     mavenCentral()
 }
 
+// Tests load the plugin classes, which need the Embulk APIs provided by Embulk at runtime.
+configurations.testImplementation {
+    extendsFrom(configurations.compileOnly.get())
+}
+
 dependencies {
     compileOnly("org.embulk:embulk-spi:0.11")
     compileOnly("org.embulk:embulk-api:0.10.43")
@@ -36,10 +41,27 @@ dependencies {
     implementation("io.trino:trino-jdbc:442")
     testImplementation(platform("org.junit:junit-bom:5.9.1"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.testcontainers:testcontainers-trino:2.0.5")
+    testRuntimeOnly("org.slf4j:slf4j-simple:2.0.7")
 }
 
 tasks.test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags("integration")
+    }
+}
+
+// Integration tests run Trino with Testcontainers, so they need Docker.
+val integrationTest by tasks.registering(Test::class) {
+    description = "Runs integration tests that need Docker."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("integration")
+    }
+    shouldRunAfter(tasks.test)
 }
 
 spotless {
