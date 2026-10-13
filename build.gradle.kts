@@ -15,7 +15,7 @@ java {
 }
 
 group = "com.reproio.embulk"
-version = "0.1.0"
+version = "0.2.0"
 description = "Trino JDBC input plugin for Embulk loads records from Trino"
 val projectUrl = "https://github.com/reproio/embulk-input-trino-jdbc"
 
@@ -146,9 +146,9 @@ tasks.sonatypeCentralUpload {
 }
 
 tasks.gem {
-    from("LICENSE.txt")
-    setProperty("authors", listOf(""))
-    setProperty("email", listOf(""))
+    from("LICENSE")
+    setProperty("authors", listOf("Kenji Okimoto"))
+    setProperty("email", listOf("kenji.okimoto@repro.io"))
     setProperty("description", project.description.toString())
     setProperty("summary", project.description.toString())
     setProperty("homepage", projectUrl)
